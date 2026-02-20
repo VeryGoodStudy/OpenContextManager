@@ -87,3 +87,61 @@ func (m *Manager) SetMetadata(id, key string, value interface{}) error {
 	ctx.SetMetadata(key, value)
 	return m.storage.Save(ctx)
 }
+
+// Summarizer is a function that generates a summary string from a slice of messages.
+type Summarizer func(messages []Message) (string, error)
+
+// SummarizeFirstNRounds summarizes the first n conversation rounds of the context
+// identified by id, then removes those rounds and inserts the summary in their place.
+// A "round" consists of a user message immediately followed by an assistant message.
+// A leading system message is always preserved.
+// The summary is inserted as a message with RoleSummary after any leading system message.
+// If fewer than n complete rounds exist, all complete rounds found are summarized.
+func (m *Manager) SummarizeFirstNRounds(id string, n int, summarizer Summarizer) error {
+	if n <= 0 {
+		return nil
+	}
+	ctx, err := m.storage.Load(id)
+	if err != nil {
+		return err
+	}
+
+	msgs := ctx.Messages
+	startIdx := 0
+	if len(msgs) > 0 && msgs[0].Role == RoleSystem {
+		startIdx = 1
+	}
+
+	// Find the end index of the first n complete rounds.
+	roundEnd := startIdx
+	roundsFound := 0
+	i := startIdx
+	for i+1 < len(msgs) && roundsFound < n {
+		if msgs[i].Role == RoleUser && msgs[i+1].Role == RoleAssistant {
+			roundEnd = i + 2
+			roundsFound++
+			i += 2
+		} else {
+			i++
+		}
+	}
+
+	if roundsFound == 0 {
+		return nil
+	}
+
+	summary, err := summarizer(msgs[startIdx:roundEnd])
+	if err != nil {
+		return err
+	}
+
+	summaryMsg := NewMessage(RoleSummary, summary)
+
+	newMsgs := make([]Message, 0, startIdx+1+len(msgs)-roundEnd)
+	newMsgs = append(newMsgs, msgs[:startIdx]...)
+	newMsgs = append(newMsgs, summaryMsg)
+	newMsgs = append(newMsgs, msgs[roundEnd:]...)
+
+	ctx.ReplaceMessages(newMsgs)
+	return m.storage.Save(ctx)
+}

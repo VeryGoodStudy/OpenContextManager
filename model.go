@@ -10,6 +10,7 @@ const (
 	RoleUser      Role = "user"
 	RoleAssistant Role = "assistant"
 	RoleTool      Role = "tool"
+	RoleSummary   Role = "summary"
 )
 
 // Message represents a single message in a conversation context.
@@ -77,6 +78,12 @@ func (c *Context) SetMetadata(key string, value interface{}) {
 		c.Metadata = make(map[string]interface{})
 	}
 	c.Metadata[key] = value
+	c.UpdatedAt = time.Now()
+}
+
+// ReplaceMessages replaces all messages in the context and updates the timestamp.
+func (c *Context) ReplaceMessages(msgs []Message) {
+	c.Messages = msgs
 	c.UpdatedAt = time.Now()
 }
 

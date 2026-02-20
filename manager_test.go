@@ -166,3 +166,132 @@ func TestManager_AppendNotFound(t *testing.T) {
 		t.Errorf("Append error = %v, want ErrContextNotFound", err)
 	}
 }
+
+func TestManager_SummarizeFirstNRounds(t *testing.T) {
+	m := NewManager(newMockStorage())
+	_, _ = m.Create("ctx-1")
+
+	_ = m.Append("ctx-1", NewMessage(RoleSystem, "You are helpful."))
+	_ = m.Append("ctx-1", NewMessage(RoleUser, "q1"))
+	_ = m.Append("ctx-1", NewMessage(RoleAssistant, "a1"))
+	_ = m.Append("ctx-1", NewMessage(RoleUser, "q2"))
+	_ = m.Append("ctx-1", NewMessage(RoleAssistant, "a2"))
+	_ = m.Append("ctx-1", NewMessage(RoleUser, "q3"))
+	_ = m.Append("ctx-1", NewMessage(RoleAssistant, "a3"))
+
+	summarizer := func(msgs []Message) (string, error) {
+		return "summary of rounds", nil
+	}
+
+	err := m.SummarizeFirstNRounds("ctx-1", 2, summarizer)
+	if err != nil {
+		t.Fatalf("SummarizeFirstNRounds: %v", err)
+	}
+
+	ctx, err := m.GetRaw("ctx-1")
+	if err != nil {
+		t.Fatalf("GetRaw: %v", err)
+	}
+
+	// Expect: [system, summary, q3, a3]
+	if len(ctx.Messages) != 4 {
+		t.Fatalf("Messages len = %d, want 4", len(ctx.Messages))
+	}
+	if ctx.Messages[0].Role != RoleSystem {
+		t.Errorf("Messages[0].Role = %q, want system", ctx.Messages[0].Role)
+	}
+	if ctx.Messages[1].Role != RoleSummary {
+		t.Errorf("Messages[1].Role = %q, want summary", ctx.Messages[1].Role)
+	}
+	if ctx.Messages[1].Content != "summary of rounds" {
+		t.Errorf("Messages[1].Content = %q, want 'summary of rounds'", ctx.Messages[1].Content)
+	}
+	if ctx.Messages[2].Content != "q3" {
+		t.Errorf("Messages[2].Content = %q, want q3", ctx.Messages[2].Content)
+	}
+	if ctx.Messages[3].Content != "a3" {
+		t.Errorf("Messages[3].Content = %q, want a3", ctx.Messages[3].Content)
+	}
+}
+
+func TestManager_SummarizeFirstNRounds_NoSystem(t *testing.T) {
+	m := NewManager(newMockStorage())
+	_, _ = m.Create("ctx-1")
+
+	_ = m.Append("ctx-1", NewMessage(RoleUser, "q1"))
+	_ = m.Append("ctx-1", NewMessage(RoleAssistant, "a1"))
+	_ = m.Append("ctx-1", NewMessage(RoleUser, "q2"))
+	_ = m.Append("ctx-1", NewMessage(RoleAssistant, "a2"))
+
+	err := m.SummarizeFirstNRounds("ctx-1", 1, func(msgs []Message) (string, error) {
+		return "summary", nil
+	})
+	if err != nil {
+		t.Fatalf("SummarizeFirstNRounds: %v", err)
+	}
+
+	ctx, _ := m.GetRaw("ctx-1")
+	// Expect: [summary, q2, a2]
+	if len(ctx.Messages) != 3 {
+		t.Fatalf("Messages len = %d, want 3", len(ctx.Messages))
+	}
+	if ctx.Messages[0].Role != RoleSummary {
+		t.Errorf("Messages[0].Role = %q, want summary", ctx.Messages[0].Role)
+	}
+	if ctx.Messages[1].Content != "q2" {
+		t.Errorf("Messages[1].Content = %q, want q2", ctx.Messages[1].Content)
+	}
+}
+
+func TestManager_SummarizeFirstNRounds_NZero(t *testing.T) {
+	m := NewManager(newMockStorage())
+	_, _ = m.Create("ctx-1")
+	_ = m.Append("ctx-1", NewMessage(RoleUser, "q1"))
+	_ = m.Append("ctx-1", NewMessage(RoleAssistant, "a1"))
+
+	err := m.SummarizeFirstNRounds("ctx-1", 0, func(msgs []Message) (string, error) {
+		return "summary", nil
+	})
+	if err != nil {
+		t.Fatalf("SummarizeFirstNRounds: %v", err)
+	}
+
+	ctx, _ := m.GetRaw("ctx-1")
+	if len(ctx.Messages) != 2 {
+		t.Fatalf("Messages len = %d, want 2 (unchanged)", len(ctx.Messages))
+	}
+}
+
+func TestManager_SummarizeFirstNRounds_FewerRoundsThanN(t *testing.T) {
+	m := NewManager(newMockStorage())
+	_, _ = m.Create("ctx-1")
+	_ = m.Append("ctx-1", NewMessage(RoleUser, "q1"))
+	_ = m.Append("ctx-1", NewMessage(RoleAssistant, "a1"))
+
+	// Ask for 5 rounds but only 1 exists — should summarize the 1 complete round.
+	err := m.SummarizeFirstNRounds("ctx-1", 5, func(msgs []Message) (string, error) {
+		return "summary", nil
+	})
+	if err != nil {
+		t.Fatalf("SummarizeFirstNRounds: %v", err)
+	}
+
+	ctx, _ := m.GetRaw("ctx-1")
+	// Expect: [summary]
+	if len(ctx.Messages) != 1 {
+		t.Fatalf("Messages len = %d, want 1", len(ctx.Messages))
+	}
+	if ctx.Messages[0].Role != RoleSummary {
+		t.Errorf("Messages[0].Role = %q, want summary", ctx.Messages[0].Role)
+	}
+}
+
+func TestManager_SummarizeFirstNRounds_NotFound(t *testing.T) {
+	m := NewManager(newMockStorage())
+	err := m.SummarizeFirstNRounds("nonexistent", 1, func(msgs []Message) (string, error) {
+		return "summary", nil
+	})
+	if !errors.Is(err, ErrContextNotFound) {
+		t.Errorf("error = %v, want ErrContextNotFound", err)
+	}
+}
